@@ -62,28 +62,32 @@ jobs:
       uses: actions/github-script@v8
       with:
         script: |
-          const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            run_id: context.runId,
-          });
-          const job = jobs.jobs.find(j => j.name === 'Code Quality Checks');
-          let body = '**Code Quality Checks** failed. Step results:\n';
-          if (job) for (const st of job.steps) body += `- ${st.name}: **${st.conclusion}**\n';
-          const fs = require('fs');
-          for (const f of ["format.log","type-check.log","lint.log","audit.log"]) {
-            if (fs.existsSync(f)) {
-              const lines = fs.readFileSync(f, 'utf8').trim().split('\n');
-              body += `\n<details><summary>${f} (tail)</summary>\n\n~~~\n${lines.slice(-50).join('\n')}\n~~~\n</details>\n`;
-            }
-          }
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-            body,
-          });
-
+        let body = '**Code Quality Checks** failed. Step results:';
+        try {
+          const jobs = await github.rest.actions.listJobsForWorkflowRun({ owner: context.repo.owner, repo: context.repo.repo, run_id: context.runId });
+          const job = (jobs.data.jobs || []).find(function (j) { return j.name === 'Code Quality Checks'; }) || jobs.data.jobs[0];
+          if (job) { for (const step of job.steps || []) { body += '\n- ' + step.name + ': **' + step.conclusion + '**'; } }
+        } catch (e) { body += '\nlistJobs error: ' + e; }
+        const fs = require('fs');
+        try {
+          const lines = fs.readFileSync('format.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>format.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no format.log: ' + e + ')'; }
+        try {
+          const lines = fs.readFileSync('type-check.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>type-check.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no type-check.log: ' + e + ')'; }
+        try {
+          const lines = fs.readFileSync('lint.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>lint.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no lint.log: ' + e + ')'; }
+        try {
+          const lines = fs.readFileSync('audit.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>audit.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no audit.log: ' + e + ')'; }
+        body += '\n_commit: ' + context.sha.slice(0, 8) + ' | run: ' + context.runId + ' | event: ' + context.eventName + ' | job: ' + context.job + ' | node: ' + process.version;
+        try { await core.summary.addRaw(body).write(); } catch (e) {}
+        await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: body });
   test:
     name: Cross-Platform Testing
     needs: code-quality
