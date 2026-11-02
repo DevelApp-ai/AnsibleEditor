@@ -13,16 +13,20 @@ jobs:
   code-quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         # Fetch full history for better analysis
         fetch-depth: 0
     
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
@@ -42,17 +46,48 @@ jobs:
         fi
     
     - name: Check code formatting
-      run: npm run format:check
+      run: set -o pipefail; npm run format:check 2>&1 | tee format.log
     
     - name: TypeScript type checking
-      run: npm run type-check
+      run: set -o pipefail; npm run type-check 2>&1 | tee type-check.log
     
     - name: ESLint check
-      run: npm run lint
+      run: set -o pipefail; npm run lint 2>&1 | tee lint.log
     
     - name: Security audit (fail on high/critical)
-      run: npm run audit
+      run: set -o pipefail; npm run audit 2>&1 | tee audit.log
 
+    - name: Report failure details to PR
+      if: failure() && github.event_name == 'pull_request'
+      uses: actions/github-script@v8
+      with:
+        script: |
+        let body = '**Code Quality Checks** failed. Step results:';
+        try {
+          const jobs = await github.rest.actions.listJobsForWorkflowRun({ owner: context.repo.owner, repo: context.repo.repo, run_id: context.runId });
+          const job = (jobs.data.jobs || []).find(function (j) { return j.name === 'Code Quality Checks'; }) || jobs.data.jobs[0];
+          if (job) { for (const step of job.steps || []) { body += '\n- ' + step.name + ': **' + step.conclusion + '**'; } }
+        } catch (e) { body += '\nlistJobs error: ' + e; }
+        const fs = require('fs');
+        try {
+          const lines = fs.readFileSync('format.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>format.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no format.log: ' + e + ')'; }
+        try {
+          const lines = fs.readFileSync('type-check.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>type-check.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no type-check.log: ' + e + ')'; }
+        try {
+          const lines = fs.readFileSync('lint.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>lint.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no lint.log: ' + e + ')'; }
+        try {
+          const lines = fs.readFileSync('audit.log', 'utf8').trim().split('\n');
+          body += '\n<details><summary>audit.log (tail)</summary>\n\n~~~\n' + lines.slice(-50).join('\n') + '\n~~~\n</details>';
+        } catch (e) { body += '\n(no audit.log: ' + e + ')'; }
+        body += '\n_commit: ' + context.sha.slice(0, 8) + ' | run: ' + context.runId + ' | event: ' + context.eventName + ' | job: ' + context.job + ' | node: ' + process.version;
+        try { await core.summary.addRaw(body).write(); } catch (e) {}
+        await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: body });
   test:
     name: Cross-Platform Testing
     needs: code-quality
@@ -73,10 +108,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     
     - name: Setup Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
@@ -169,10 +204,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
@@ -187,7 +222,7 @@ jobs:
       run: npx electron-builder build --${{ matrix.platform }} --publish never
     
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.artifact-name }}
         path: release/
@@ -212,10 +247,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
@@ -240,10 +275,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
